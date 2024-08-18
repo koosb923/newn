@@ -81,7 +81,7 @@ class WebViewManager {
           boxShadow: [
             BoxShadow(
               color: config.shadowColor, // JSON에서 가져온 그림자 색상 적용
-              spreadRadius: 1,
+              spreadRadius: 4,
               blurRadius: 80,
             ),
           ],
