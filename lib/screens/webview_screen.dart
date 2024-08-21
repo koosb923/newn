@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:provider/provider.dart';
 import '../services/webview_manager.dart';
 import '../utils/site_config.dart';
 import 'floating_button.dart';
@@ -27,6 +28,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
       SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
       ),
     );
   }
@@ -34,37 +36,32 @@ class _WebViewScreenState extends State<WebViewScreen> {
   Future<void> _initializeApp() async {
     try {
       await loadSiteConfigs();
+      print("사이트 설정이 로드되었습니다: ${siteConfigs.length}");
+
       if (siteConfigs.isNotEmpty) {
-        webViewManager = WebViewManager(
-          siteConfigs: siteConfigs,
-          currentWebView: siteConfigs[0].url.startsWith('http')
-              ? siteConfigs[0].url
-              : 'https://${siteConfigs[0].url}',
-        );
-        if (mounted) {
-          setState(() {
-            isLoading = false;
-          });
-        }
-      }
-    } catch (error) {
-      print('사이트 설정 불러오기 실패: $error');
-      if (mounted) {
         setState(() {
+          webViewManager = WebViewManager(
+            siteConfigs: siteConfigs,
+            currentWebView: siteConfigs[0].url.startsWith('http')
+                ? siteConfigs[0].url
+                : 'https://${siteConfigs[0].url}',
+          );
           isLoading = false;
         });
+      } else {
+        throw Exception('사이트 설정을 찾을 수 없습니다.');
       }
+    } catch (error) {
+      print('사이트 설정 로드 실패: $error');
+      setState(() {
+        isLoading = false;
+      });
     }
   }
 
   @override
-  void dispose() {
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (isLoading || webViewManager == null) {
+    if (isLoading) {
       return Scaffold(
         body: Center(
           child: CircularProgressIndicator(),
@@ -79,29 +76,52 @@ class _WebViewScreenState extends State<WebViewScreen> {
         bottom: false,
         child: Stack(
           children: [
-            webViewManager!.buildCurrentWebView(),
+            IndexedStack(
+              index: webViewManager!.getCurrentIndex(),
+              children: webViewManager!.buildWebViews(),
+            ),
             Positioned(
               bottom: 150.0,
               left: 0,
-              child: FloatingButton(
-                onPressed: () => showCustomBottomSheet(
-                  context,
-                  (url) async {
-                    if (!mounted) return;
-                    setState(() => isLoading = true);
-                    await webViewManager!.switchWebView(url);
-                    if (!mounted) return;
-                    setState(() => isLoading = false);
-                    print('WebView로 전환: $url');
-                  },
+              right: 0,
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: FloatingButton(
+                  onPressed: () => showCustomBottomSheet(
+                    context,
+                    (url) {
+                      setState(() {
+                        isLoading = true;
+                        webViewManager!.switchWebView(url);
+                        isLoading = false;
+                      });
+                    },
+                  ),
                 ),
               ),
             ),
-            if (isLoading)
-              Center(child: CircularProgressIndicator()), // 로딩 상태 표시
           ],
         ),
       ),
+    );
+  }
+
+  void _showPointDialog(BuildContext context, int currentPoints) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('포인트가 부족합니다.'),
+          content: Text(
+              '2,000P 모아서 광고제거 30일 이용하세요.\n현재 포인트: $currentPoints P\n1분당 1P 하루 최대 100P까지 모을 수 있어요.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('확인'),
+            ),
+          ],
+        );
+      },
     );
   }
 }
