@@ -1,88 +1,109 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../utils/site_config.dart';
+import '../utils/webview_state_manager.dart';
+import '../utils/webview_switcher.dart';
 
-class WebViewManager {
+class WebViewManager extends ChangeNotifier {
   final List<SiteConfig> siteConfigs;
-  Map<String, InAppWebViewController> webViewControllers = {};
+  final Map<String, InAppWebViewController> webViewControllers = {};
   String currentWebView;
   Color _backgroundColor = Colors.black;
   Color _shadowColor = Colors.black.withOpacity(0.5);
 
-  WebViewManager({required this.siteConfigs, required this.currentWebView}) {
+  late final WebViewSwitcher _webViewSwitcher;
+
+  WebViewManager({
+    required this.siteConfigs,
+    required this.currentWebView,
+  }) {
     if (siteConfigs.isNotEmpty) {
-      // 첫 번째 사이트로 초기화
       currentWebView = siteConfigs[0].url.startsWith('http')
           ? siteConfigs[0].url
           : 'https://${siteConfigs[0].url}';
       applySiteConfig(currentWebView);
     }
+
+    _webViewSwitcher = WebViewSwitcher(
+      webViewControllers: webViewControllers,
+      applySiteConfig: applySiteConfig,
+      currentWebView: currentWebView,
+      notifyUIUpdate: _notifyUIUpdate,
+    );
   }
 
   int getCurrentIndex() {
-    return siteConfigs.indexWhere((config) => config.url == currentWebView);
+    int index =
+        siteConfigs.indexWhere((config) => currentWebView == config.url);
+    print("현재 웹뷰 인덱스: $index, URL: $currentWebView");
+    return index == -1 ? 0 : index;
   }
 
   Color get backgroundColor => _backgroundColor;
   Color get shadowColor => _shadowColor;
 
   void applySiteConfig(String urlPattern) {
-    // 기본 설정을 별도로 정의하여 코드 중복을 피함
-    SiteConfig defaultConfig = SiteConfig(
-      url: 'default',
-      buttonText: 'Default',
-      scriptUrl: '',
-      backgroundColor: Colors.white,
-      shadowColor: Colors.black.withOpacity(0.5),
-      injectScript: false,
-      iconUrl: '',
-    );
-
     SiteConfig config = siteConfigs.firstWhere(
       (config) => urlPattern.contains(config.url),
-      orElse: () => defaultConfig,
+      orElse: () => SiteConfig(
+        url: 'default',
+        buttonText: '기본',
+        scriptUrl: '',
+        backgroundColor: Colors.white,
+        shadowColor: Colors.black.withOpacity(0.5),
+        injectScript: false,
+        iconUrl: '',
+      ),
     );
 
     _backgroundColor = config.backgroundColor;
     _shadowColor = config.shadowColor;
+    print("사이트 설정 적용 완료: $urlPattern");
   }
 
-  void switchWebView(String urlPattern) async {
-    currentWebView = urlPattern;
-    applySiteConfig(urlPattern);
+  Future<void> switchWebView(String urlPattern) async {
+    if (currentWebView == urlPattern) {
+      print("이미 동일한 웹뷰가 활성화되어 있습니다: $urlPattern");
+      return;
+    }
 
-    // URL이 http로 시작하지 않으면 https를 추가
-    String formattedUrl =
-        urlPattern.startsWith('http') ? urlPattern : 'https://$urlPattern';
-
-    if (webViewControllers.containsKey(formattedUrl)) {
-      InAppWebViewController controller = webViewControllers[formattedUrl]!;
-
-      // 해당 URL의 웹뷰를 로드
-      await controller.loadUrl(
-        urlRequest: URLRequest(url: WebUri(formattedUrl)),
-      );
-    } else {
-      print("No WebView found for the given URL pattern");
+    try {
+      await _webViewSwitcher.switchWebView(urlPattern);
+      _notifyUIUpdate(); // 웹뷰 전환 후 UI 강제 업데이트
+    } catch (e) {
+      print("웹뷰 전환 중 오류 발생: $e");
     }
   }
 
-  List<Widget> buildWebViews() {
-    return siteConfigs.map((config) {
-      String formattedUrl =
-          config.url.startsWith('http') ? config.url : 'https://${config.url}';
+  void _notifyUIUpdate() {
+    notifyListeners(); // UI 업데이트를 위한 ChangeNotifier 사용
+  }
 
-      print("Building WebView for URL: $formattedUrl");
+  Widget buildCurrentWebView() {
+    String formattedUrl = currentWebView.startsWith('http')
+        ? currentWebView
+        : 'https://$currentWebView';
 
-      return Container(
+    if (!webViewControllers.containsKey(formattedUrl)) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    InAppWebViewController? controller = webViewControllers[formattedUrl];
+    if (controller == null) {
+      return Center(child: Text("WebView 로드 실패"));
+    }
+
+    return Offstage(
+      offstage: false,
+      child: Container(
         decoration: BoxDecoration(
-          color: config.backgroundColor, // JSON에서 가져온 배경색 적용
+          color: _backgroundColor,
           borderRadius: BorderRadius.vertical(top: Radius.circular(16.0)),
           boxShadow: [
             BoxShadow(
-              color: config.shadowColor, // JSON에서 가져온 그림자 색상 적용
-              spreadRadius: 4,
-              blurRadius: 80,
+              color: _shadowColor,
+              spreadRadius: 6,
+              blurRadius: 128,
             ),
           ],
         ),
@@ -95,11 +116,8 @@ class WebViewManager {
             initialOptions: InAppWebViewGroupOptions(
               crossPlatform: InAppWebViewOptions(
                 javaScriptEnabled: true,
-                useOnLoadResource: false,
                 clearCache: false,
                 disableContextMenu: true,
-                userAgent:
-                    "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15A372 Safari/604.1",
               ),
               android: AndroidInAppWebViewOptions(
                 allowFileAccess: false,
@@ -109,26 +127,24 @@ class WebViewManager {
               ),
               ios: IOSInAppWebViewOptions(
                 allowsInlineMediaPlayback: true,
-                allowsAirPlayForMediaPlayback: false,
-                allowsPictureInPictureMediaPlayback: false,
               ),
             ),
             onWebViewCreated: (InAppWebViewController controller) {
               webViewControllers[formattedUrl] = controller;
-              print("WebView created for URL: $formattedUrl");
+              print("웹뷰 컨트롤러 생성 성공: $formattedUrl");
             },
             onLoadStart: (controller, url) {
-              print("WebView started loading: $url");
+              print("웹뷰 로딩 시작: $url");
             },
             onLoadStop: (controller, url) {
-              print("WebView finished loading: $url");
+              print("웹뷰 로딩 완료: $url");
             },
             onLoadError: (controller, url, code, message) {
-              print("WebView failed to load: $url, Error: $message");
+              print("웹뷰 로딩 실패: $url, 에러: $message");
             },
           ),
         ),
-      );
-    }).toList();
+      ),
+    );
   }
 }

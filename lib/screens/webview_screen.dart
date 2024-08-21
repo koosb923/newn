@@ -25,9 +25,8 @@ class _WebViewScreenState extends State<WebViewScreen> {
   void _setStatusBarStyle() {
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent, // 상태바 배경색 투명
-        statusBarIconBrightness: Brightness.light, // 상태바 아이콘과 텍스트를 흰색으로 설정
-        statusBarBrightness: Brightness.dark, // iOS에서 상태바의 밝기 조정
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
       ),
     );
   }
@@ -35,32 +34,37 @@ class _WebViewScreenState extends State<WebViewScreen> {
   Future<void> _initializeApp() async {
     try {
       await loadSiteConfigs();
-      print("Site configs loaded: ${siteConfigs.length}");
-
       if (siteConfigs.isNotEmpty) {
-        setState(() {
-          webViewManager = WebViewManager(
-            siteConfigs: siteConfigs,
-            currentWebView: siteConfigs[0].url.startsWith('http')
-                ? siteConfigs[0].url
-                : 'https://${siteConfigs[0].url}',
-          );
-          isLoading = false;
-        });
-      } else {
-        throw Exception('No site configurations found.');
+        webViewManager = WebViewManager(
+          siteConfigs: siteConfigs,
+          currentWebView: siteConfigs[0].url.startsWith('http')
+              ? siteConfigs[0].url
+              : 'https://${siteConfigs[0].url}',
+        );
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+          });
+        }
       }
     } catch (error) {
-      print('Failed to load site configs: $error');
-      setState(() {
-        isLoading = false;
-      });
+      print('사이트 설정 불러오기 실패: $error');
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
   @override
+  void dispose() {
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (isLoading) {
+    if (isLoading || webViewManager == null) {
       return Scaffold(
         body: Center(
           child: CircularProgressIndicator(),
@@ -75,30 +79,26 @@ class _WebViewScreenState extends State<WebViewScreen> {
         bottom: false,
         child: Stack(
           children: [
-            IndexedStack(
-              index: webViewManager!.getCurrentIndex(),
-              children: webViewManager!.buildWebViews(),
-            ),
+            webViewManager!.buildCurrentWebView(),
             Positioned(
               bottom: 150.0,
               left: 0,
-              right: 0,
-              child: Align(
-                alignment: Alignment.bottomLeft,
-                child: FloatingButton(
-                  onPressed: () => showCustomBottomSheet(
-                    context,
-                    (url) {
-                      setState(() {
-                        isLoading = true;
-                        webViewManager!.switchWebView(url);
-                        isLoading = false;
-                      });
-                    },
-                  ),
+              child: FloatingButton(
+                onPressed: () => showCustomBottomSheet(
+                  context,
+                  (url) async {
+                    if (!mounted) return;
+                    setState(() => isLoading = true);
+                    await webViewManager!.switchWebView(url);
+                    if (!mounted) return;
+                    setState(() => isLoading = false);
+                    print('WebView로 전환: $url');
+                  },
                 ),
               ),
             ),
+            if (isLoading)
+              Center(child: CircularProgressIndicator()), // 로딩 상태 표시
           ],
         ),
       ),
